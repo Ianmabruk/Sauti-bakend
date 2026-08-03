@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import { Maximize2, X } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { api } from '../../services/api'
 
 export const VirtualDesignPage = () => {
@@ -8,147 +8,154 @@ export const VirtualDesignPage = () => {
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState('')
   const [fullscreen, setFullscreen] = useState(null)
-  const fullscreenRef = useRef(null)
 
   useEffect(() => {
-    api
-      .get('/content/virtual-design')
+    api.get('/content/virtual-design')
       .then((res) => setItems(res.data || []))
       .catch(() => setItems([]))
       .finally(() => setLoading(false))
   }, [])
 
+  useEffect(() => {
+    if (fullscreen) document.body.style.overflow = 'hidden'
+    else document.body.style.overflow = ''
+    return () => { document.body.style.overflow = '' }
+  }, [fullscreen])
+
   const filtered = useMemo(() => {
     if (!query) return items
     const q = query.toLowerCase()
-    return items.filter(
-      (i) => i.title?.toLowerCase().includes(q) || i.description?.toLowerCase().includes(q),
-    )
+    return items.filter((i) => i.title?.toLowerCase().includes(q) || i.description?.toLowerCase().includes(q))
   }, [items, query])
 
-  const openFullscreen = (item) => {
-    setFullscreen(item)
-    document.body.style.overflow = 'hidden'
-  }
-
-  const closeFullscreen = () => {
-    setFullscreen(null)
-    document.body.style.overflow = ''
-  }
-
   return (
-    <div className="mx-auto max-w-7xl px-4 py-12 md:px-8">
-      <h1 className="font-display text-5xl">Virtual Interior Design</h1>
-      <p className="mt-3 max-w-3xl text-sm text-ink/70">
-        Immersive walkthroughs, luxury showcases, and interior design experiences.
-      </p>
+    <div>
+      {/* Header */}
+      <div className="section-pad bg-linen pb-12">
+        <div className="container-wide px-6 md:px-12 lg:px-20">
+          <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}>
+            <p className="eyebrow mb-4">Immersive Design</p>
+            <h1 className="font-display text-6xl font-medium leading-tight text-ink md:text-7xl">
+              Virtual Showroom
+            </h1>
+            <p className="mt-4 max-w-xl text-base text-ink/50">
+              Immersive walkthroughs, luxury showcases, and interior design experiences.
+            </p>
+          </motion.div>
+        </div>
+      </div>
 
       {/* Search */}
-      <div className="mt-8">
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search showroom..."
-          className="w-full max-w-sm rounded-xl border border-black/15 bg-white px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-orange/30"
-        />
-      </div>
-
-      {loading && (
-        <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="h-64 animate-pulse rounded-2xl bg-beige" />
-          ))}
+      <div className="border-b border-sand bg-cream">
+        <div className="container-wide px-6 py-4 md:px-12 lg:px-20">
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search showroom..."
+            className="input-box max-w-xs py-2 text-xs"
+          />
         </div>
-      )}
-
-      {!loading && filtered.length === 0 && (
-        <p className="mt-12 text-center text-sm text-ink/50">
-          {items.length === 0 ? 'No showroom content yet.' : 'No results match your search.'}
-        </p>
-      )}
-
-      <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-        {filtered.map((item, i) => (
-          <motion.article
-            key={item._id}
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.06 }}
-            className="group overflow-hidden rounded-2xl border border-black/10 bg-white shadow-soft"
-          >
-            <div className="relative">
-              <video
-                src={item.videoUrl}
-                className="h-64 w-full object-cover"
-                autoPlay
-                loop
-                muted
-                playsInline
-                preload="metadata"
-              />
-              <button
-                onClick={() => openFullscreen(item)}
-                className="absolute right-3 top-3 rounded-full bg-black/50 p-2 text-white opacity-0 transition group-hover:opacity-100 hover:bg-black/70"
-                aria-label="Full screen"
-              >
-                <Maximize2 size={16} />
-              </button>
-            </div>
-            <div className="p-4">
-              <h3 className="font-display text-2xl">{item.title}</h3>
-              {item.description && (
-                <p className="mt-1 text-sm text-ink/65 line-clamp-2">{item.description}</p>
-              )}
-              {item.services?.length > 0 && (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {item.services.map((s, idx) => (
-                    <span
-                      key={idx}
-                      className="rounded-full bg-beige px-3 py-1 text-[10px] uppercase tracking-[0.12em] text-ink/70"
-                    >
-                      {s.title}
-                    </span>
-                  ))}
-                </div>
-              )}
-              <button
-                onClick={() => openFullscreen(item)}
-                className="mt-4 rounded-full border border-ink px-5 py-2 text-xs uppercase tracking-[0.14em] transition hover:bg-ink hover:text-white"
-              >
-                Watch Full Screen
-              </button>
-            </div>
-          </motion.article>
-        ))}
       </div>
 
-      {/* Full-screen modal */}
+      {/* Grid */}
+      <div className="section-pad bg-cream pt-12">
+        <div className="container-wide px-6 md:px-12 lg:px-20">
+          {loading && (
+            <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
+              {[1, 2, 3].map((i) => (
+                <div key={i}>
+                  <div className="skeleton aspect-[4/3] w-full" />
+                  <div className="mt-4 space-y-2">
+                    <div className="skeleton h-5 w-48" />
+                    <div className="skeleton h-4 w-full" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {!loading && filtered.length === 0 && (
+            <div className="py-24 text-center">
+              <p className="font-display text-3xl text-ink/30">
+                {items.length === 0 ? 'No showroom content yet.' : 'No results found.'}
+              </p>
+            </div>
+          )}
+
+          <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-3">
+            {filtered.map((item, i) => (
+              <motion.article
+                key={item._id}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: i * 0.07, duration: 0.6 }}
+                className="group"
+              >
+                <div className="relative overflow-hidden bg-linen aspect-[4/3]">
+                  <video
+                    src={item.videoUrl}
+                    className="h-full w-full object-cover transition duration-700 group-hover:scale-105"
+                    autoPlay loop muted playsInline preload="metadata"
+                  />
+                  <div className="absolute inset-0 bg-ink/0 transition-all duration-500 group-hover:bg-ink/20" />
+                  <button
+                    onClick={() => setFullscreen(item)}
+                    className="absolute right-4 top-4 flex h-10 w-10 items-center justify-center bg-white/90 text-ink opacity-0 transition-all duration-300 group-hover:opacity-100 hover:bg-white"
+                    aria-label="Full screen"
+                  >
+                    <Maximize2 size={15} strokeWidth={1.5} />
+                  </button>
+                </div>
+                <div className="pt-5">
+                  <h3 className="font-display text-2xl font-medium text-ink">{item.title}</h3>
+                  {item.description && (
+                    <p className="mt-2 text-sm leading-relaxed text-ink/50 line-clamp-2">{item.description}</p>
+                  )}
+                  {item.services?.length > 0 && (
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {item.services.map((s, idx) => (
+                        <span key={idx} className="border border-sand px-3 py-1 text-2xs font-medium uppercase tracking-widest text-ink/50">
+                          {s.title}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <button
+                    onClick={() => setFullscreen(item)}
+                    className="mt-5 btn-outline py-2.5 px-6 text-2xs"
+                  >
+                    Watch Full Screen
+                  </button>
+                </div>
+              </motion.article>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Fullscreen modal */}
       <AnimatePresence>
         {fullscreen && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-ink"
           >
             <button
-              onClick={closeFullscreen}
-              className="absolute right-4 top-4 z-10 rounded-full bg-white/10 p-3 text-white transition hover:bg-white/20"
+              onClick={() => setFullscreen(null)}
+              className="absolute right-5 top-5 z-10 flex h-11 w-11 items-center justify-center border border-white/20 text-white/70 transition hover:border-white hover:text-white"
               aria-label="Close"
             >
-              <X size={20} />
+              <X size={18} strokeWidth={1.5} />
             </button>
             <video
-              ref={fullscreenRef}
               src={fullscreen.videoUrl}
-              controls
-              autoPlay
-              loop
-              playsInline
+              controls autoPlay loop playsInline
               className="max-h-screen w-full object-contain"
             />
-            <div className="absolute bottom-6 left-0 right-0 px-6 text-center">
-              <p className="font-display text-2xl text-white drop-shadow">{fullscreen.title}</p>
+            <div className="absolute bottom-8 left-0 right-0 px-8 text-center">
+              <p className="font-display text-2xl font-medium text-white/80">{fullscreen.title}</p>
             </div>
           </motion.div>
         )}
