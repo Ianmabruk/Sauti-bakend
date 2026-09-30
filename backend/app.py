@@ -4,6 +4,7 @@ import sys
 
 from flask import Flask
 from flask_talisman import Talisman
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .api import register_blueprints
 from .api.limiter import limiter
@@ -58,12 +59,23 @@ def create_app(config_object: type = Config) -> Flask:
     db.init_app(app)
     migrate.init_app(app, db)
 
+    # Behind a TLS-terminating proxy (Render, Heroku, nginx, a load balancer)
+    # the connection to this process is plain HTTP, so Flask would report
+    # every request as insecure and build http:// absolute URLs. Trusting one
+    # proxy hop restores the original scheme and client address. The header is
+    # only meaningful because the proxy overwrites it; on a direct connection
+    # there is nothing to misread.
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+
     # Security headers (skip in testing to avoid HTTPS redirects)
     if not app.config.get("TESTING"):
         Talisman(
             app,
             content_security_policy=None,
             frame_options="DENY",
+            # Render terminates TLS at its proxy and speaks HTTP to the
+            # container. Forcing HTTPS here would redirect Render's own plain
+            # HTTP health check and fail the deploy.
             force_https=False,
         )
 

@@ -1,21 +1,19 @@
 # Render blueprint for the SautiPay backend.
 #
 # Deploy with: connect this repository in Render, choose "Blueprint", and it
-# reads this file. Postgres is provisioned and its connection string is wired
-# in automatically — you do not need to copy it anywhere.
+# reads this file. Render prompts for the three `sync: false` values before the
+# first deploy.
 #
-# Before the first deploy, set the values marked `sync: false` in the Render
-# dashboard. Render will prompt for them.
+# Two things to know before you start:
 #
-# NOTE ON THE MODEL KEY: the provider is Groq (groq.com), not xAI Grok. The
-# variable is GROQ_API_KEY and a key from console.x.ai will be rejected. Get one
-# at https://console.groq.com/keys
-#
-# NOTE ON THE DATABASE: supply your own managed Postgres (Neon, Supabase,
-# RDS...) by setting DATABASE_URL below. No database is provisioned here, so
-# nothing in this file holds credentials. The default DATABASE_URL in
-# backend/config is a SQLite file, which a PaaS filesystem wipes on every
-# restart — never rely on it in production.
+#   1. The model provider is GROQ (groq.com), not xAI Grok. The variable is
+#      GROQ_API_KEY. A key from console.x.ai will be rejected — there is no
+#      xAI integration in this codebase.
+#   2. Dependencies are declared in pyproject.toml, not requirements.txt.
+#      `pip install -e .` is what installs them. The `ai` package is imported
+#      at request time and is deliberately excluded from the installed
+#      distribution, which is why rootDir is the repository root and why gunicorn
+#      must be started from there.
 
 services:
   - type: web
@@ -24,83 +22,104 @@ services:
     plan: free
     region: frankfurt
 
-    # Must be the repository root: the `ai` package is imported at request
-    # time and is not part of the installed distribution, so it has to be
-    # importable from the working directory.
     rootDir: .
 
     buildCommand: pip install --upgrade pip && pip install -e .
-    startCommand: gunicorn -w 2 -k gthread --threads 4 -b 0.0.0.0:$PORT --timeout 120 wsgi:app
+    startCommand: >-
+      gunicorn wsgi:app
+      --bind 0.0.0.0:$PORT
+      --workers 2
+      --worker-class gthread
+      --threads 4
+      --timeout 120
+      --access-logfile -
+      --error-logfile -
 
+    # /api/health, not /health. There is no bare /health route in this app;
+    # pointing Render at one returns 404 and the deploy fails.
     healthCheckPath: /api/health
 
+    # Render restarts the container after roughly 50 minutes of no inbound
+    # traffic. A free-tier idle web service cannot answer a health check while
+    # it sleeps, so pinning this off avoids a "deploy failed" on a service that
+    # is merely idle. Turn it back on once you have a paid instance.
+    autoDeploy: true
+
     # Uploads survive only with a disk. Free tier disks are not available, so
-    # on the free plan uploaded media is lost on every restart and redeploy.
-    # Set `plan: starter` below and uncomment disk to persist it.
+    # on the free plan anything uploaded under instance/media is lost on every
+    # restart and redeploy. Switch plan to starter and uncomment to persist.
     # disk:
     #   name: sautipay-media
     #   mountPath: /opt/render/project/src/instance/media
     #   sizeGB: 1
 
     envVars:
-      # --- Required: your own Postgres. ---
-      # Full Neon/Supabase/RDS URL including credentials, e.g.
-      # postgresql://USER:PASSWORD@HOST/DB?sslmode=require
+      # --- Required: your own managed Postgres ---------------------------
+      # Neon, Supabase or RDS. Full URL with credentials and sslmode.
       # Never commit this value; set it in the Render dashboard only.
+      # The application default is a SQLite file, and a PaaS filesystem wipes
+      # that on every restart, so this must be a real database in production.
       - key: DATABASE_URL
         sync: false
 
-      - key: PYTHON_VERSION
-        value: "3.12.8"
-
-      # Must match the frontend's public origin, or the browser is blocked by
-      # CORS. Set this after the first frontend deploy, when you know its URL.
-      - key: ALLOWED_ORIGINS
-        sync: false
-
-      # --- Required. Set these in the dashboard before first deploy. ---
-
-      # Model provider key from https://console.groq.com/keys (NOT xAI).
+      # --- Required: the model provider -----------------------------------
+      # From https://console.groq.com/keys
       - key: GROQ_API_KEY
         sync: false
 
-      # Any long random string. Guards the /api/admin/* routes, which
-      # otherwise return 503. Clients send it as `X-Admin-Token`.
-      - key: ADMIN_TOKEN
-        generateValue: true
+      # --- Required: the frontend's public origin --------------------------
+      # Comma-separated. Set this after the frontend deploys, then save.
+      # No rebuild is needed for this one; it is read at request time.
+      - key: ALLOWED_ORIGINS
+        sync: false
 
-      # `production` switches off debug output and the development server.
-      - key: FLASK_ENV
-        value: production
-
-      - key: SECRET_KEY
-        generateValue: true
-
-      # Web search backend for grounded answers and citations.
-      # `stub` returns canned results and is fine for a smoke test, but real
-      # answers with sources need a keyed provider: brave, tavily or serpapi.
-      # Get a key at https://brave.com/search/api/ (or the equivalent).
+      # --- Optional: real web search for citations --------------------------
+      # Leave SEARCH_PROVIDER at stub and answers still work, but research
+      # returns canned results and no sources are cited. For live citations
+      # use brave, tavily or serpapi and supply a key.
       - key: SEARCH_PROVIDER
         value: stub
       - key: SEARCH_API_KEY
         sync: false
 
-      # Speech to text for voice input. Defaults are fine.
+      # --- Generated for you ------------------------------------------------
+      # Signs Flask sessions. Must not be the development default.
+      - key: SECRET_KEY
+        generateValue: true
+
+      # Guards /api/admin/* via the X-Admin-Token header. Those routes return
+      # 503 while this is unset.
+      - key: ADMIN_TOKEN
+        generateValue: true
+
+      # --- Settings ---------------------------------------------------------
+      - key: PYTHON_VERSION
+        value: "3.12.8"
+
+      # production keeps DEBUG off. Leaving this unset or set to development
+      # turns on the Flask debug server behaviour and verbose error output.
+      - key: FLASK_ENV
+        value: production
+
       - key: GROQ_MODEL
         value: qwen/qwen3.8-27b
       - key: GROQ_STT_MODEL
         value: whisper-large-v3-turbo
 
-      # Keep under your Groq tier's output-tokens-per-minute limit. The free
-      # tier is 1000; asking for more returns a 429 for the whole request
-      # rather than truncating the answer.
+      # Keep this under your Groq tier's output-tokens-per-minute limit. The
+      # free tier is 1000. Exceeding it returns a 429 for the entire request
+      # rather than a truncated answer, so long replies fail intermittently.
       - key: GROQ_MAX_TOKENS
         value: "900"
 
-      # Required once a disk is attached; otherwise uploads go to ephemeral
-      # storage and disappear on restart.
+      # Only meaningful with a disk attached.
       - key: MEDIA_ROOT
         value: instance/media
 
       - key: LOG_LEVEL
         value: INFO
+
+      # Rate-limit counters live in process memory. Correct for a single
+      # instance; switch to a shared store before scaling to more than one.
+      - key: RATE_LIMIT_STORAGE
+        value: "memory://"
