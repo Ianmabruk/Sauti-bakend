@@ -48,6 +48,51 @@ def parse_allowed_origins(raw: str) -> list[str]:
     return origins
 
 
+def parse_pool_options(database_url: str) -> dict:
+    """Build the SQLAlchemy engine options for a database URL.
+
+    Connection pooling exists to reuse sockets across requests, which is what
+    makes talking to a network database viable. SQLAlchemy's defaults leave
+    pool_recycle disabled, so a connection is held open indefinitely. Any proxy,
+    load balancer or serverless platform in front of the database closes idle
+    connections on its own schedule, and those dead sockets stay in the pool
+    until something borrows one. The next request then fails deep in the
+    driver, with "SSL error: decryption failed or bad record mac" or "server
+    closed the connection unexpectedly", which reads like corruption rather
+    than the stale connection it actually is.
+
+    pool_pre_ping validates a connection before handing it out and discards it
+    if the server is gone, so the request transparently opens a fresh one.
+    pool_recycle caps connection age so it never reaches the age at which the
+    far end drops it.
+
+    These are sizing options for a network client. A SQLite pool is a single
+    connection by design and rejects pool_size, max_overflow and pool_timeout
+    outright, so the whole block is suppressed for a SQLite URL. That keeps
+    local development and the test suite, which use SQLite or an in-memory
+    database, on the same code path as production.
+
+    Args:
+        database_url: The configured database URL, inspected only to decide
+            whether pool sizing is meaningful.
+
+    Returns:
+        A dict of engine options, empty for SQLite.
+    """
+    if database_url.startswith("sqlite"):
+        return {}
+
+    return {
+        "pool_pre_ping": True,
+        "pool_recycle": int(os.environ.get("DB_POOL_RECYCLE", "300")),
+        "pool_size": int(os.environ.get("DB_POOL_SIZE", "5")),
+        "max_overflow": int(os.environ.get("DB_MAX_OVERFLOW", "10")),
+        # Bounds how long a request waits for a connection instead of hanging
+        # until the far end gives up.
+        "pool_timeout": int(os.environ.get("DB_POOL_TIMEOUT", "10")),
+    }
+
+
 def origin_is_allowed(origin: str, allowed: list[str]) -> bool:
     """True when ``origin`` matches an entry in the allowlist.
 
@@ -101,6 +146,8 @@ class Config:
         "sqlite:///sautipay.db",
     )
 
+    SQLALCHEMY_ENGINE_OPTIONS = parse_pool_options(DATABASE_URL)
+
     # Model
     MODEL_PROVIDER = os.environ.get("MODEL_PROVIDER", "mock")
     LOCAL_MODEL_PATH = os.environ.get("LOCAL_MODEL_PATH", "/models/sauti-model")
@@ -153,6 +200,12 @@ class TestingConfig(Config):
         "sqlite:///:memory:",
     )
     SQLALCHEMY_DATABASE_URI = DATABASE_URL
+    # Derived from this class's own URL, not inherited. Config was built from
+    # DATABASE_URL, which on a developer machine or CI is usually Postgres, so
+    # inheriting its pool sizing would hand pool_size and max_overflow to a
+    # SQLite StaticPool, which rejects them and fails every test at engine
+    # creation.
+    SQLALCHEMY_ENGINE_OPTIONS = parse_pool_options(DATABASE_URL)
     ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "test-admin-token")
 
 

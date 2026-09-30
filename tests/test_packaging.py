@@ -78,3 +78,67 @@ class TestRequirementsStayInSync:
         """The JARVIS audio stack must not land on the API server."""
         forbidden = {"edge-tts", "sounddevice", "pyaudio", "soundfile"}
         assert not (forbidden & _requirements_file_deps())
+
+class TestConnectionPool:
+    """Pool settings must survive a connection dropped by an intermediary.
+
+    Render, Heroku, nginx and Neon's own pooler all close idle connections on
+    their own schedule. SQLAlchemy's default leaves pool_recycle disabled, so a
+    dead socket stays in the pool until a request borrows it, and that request
+    then fails deep in the driver with an OperationalError that reads like
+    corruption rather than staleness.
+    """
+
+    def _postgres_options(self):
+        """Options as they apply to a network database, regardless of this
+        machine's DATABASE_URL."""
+        from backend.config.base import parse_pool_options
+
+        return parse_pool_options("postgresql://user:pw@host/db")
+
+    def test_pre_ping_is_enabled(self):
+        assert self._postgres_options()["pool_pre_ping"] is True
+
+    def test_pool_recycle_is_finite(self):
+        recycle = self._postgres_options()["pool_recycle"]
+        assert 0 < recycle <= 900, "recycle must be on, and short enough to beat the far end"
+
+    def test_sqlite_gets_no_pool_sizing(self):
+        """SQLite pools are single connections and reject these kwargs."""
+        from backend.config.base import parse_pool_options
+
+        assert parse_pool_options("sqlite:///sautipay.db") == {}
+        assert parse_pool_options("sqlite:///:memory:") == {}
+
+    def test_engine_options_match_the_database_url(self):
+        from backend.config.base import Config
+
+        url = Config.SQLALCHEMY_DATABASE_URI
+        expected = {} if url.startswith("sqlite") else self._postgres_options()
+        assert Config.SQLALCHEMY_ENGINE_OPTIONS == expected
+
+    @staticmethod
+    def _app():
+        from backend.app import create_app
+        from backend.config.base import Config
+
+        return create_app(Config)
+
+    def test_engine_actually_receives_the_options(self):
+        with self._app().app_context():
+            from backend.db import db
+
+            assert db.engine.pool._pre_ping is True
+            assert db.engine.pool._recycle
+
+    def test_query_survives_a_returned_connection(self):
+        """A connection handed back and borrowed again must still work."""
+        from sqlalchemy import text
+
+        with self._app().app_context():
+            from backend.db import db
+
+            assert db.session.execute(text("select 1")).scalar() == 1
+            raw = db.engine.raw_connection()
+            raw.close()
+            assert db.session.execute(text("select 1")).scalar() == 1
