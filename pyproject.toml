@@ -14,7 +14,13 @@ dependencies = [
     "flask-migrate>=4.0",
     "sqlalchemy>=2.0",
     "alembic>=1.13",
+    # Both PostgreSQL drivers are declared deliberately. SQLAlchemy 2.0
+    # resolves a bare `postgresql://` URL to the psycopg2 dialect, while 2.1
+    # switched that default to psycopg 3. Since this project imports no driver
+    # directly and lets SQLAlchemy pick, installing only one of them makes the
+    # app fail to boot on whichever side of that change the resolver lands.
     "psycopg2-binary>=2.9",
+    "psycopg[binary]>=3.1",
     # Request/response validation for the SAUTI API.
     "pydantic>=2.5",
     # Async HTTP client for web search and page reading.

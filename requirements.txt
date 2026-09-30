@@ -20,7 +20,14 @@ flask-sqlalchemy>=3.1
 flask-migrate>=4.0
 sqlalchemy>=2.0
 alembic>=1.13
+# Both PostgreSQL drivers are declared deliberately. SQLAlchemy 2.0 resolves a
+# bare `postgresql://` URL to the psycopg2 dialect, while 2.1 switched that
+# default to psycopg 3. This project imports no driver directly and lets
+# SQLAlchemy choose, so installing only one breaks the app on whichever side of
+# that change the resolver lands. Deploys hit this: SQLAlchemy 2.1.1 plus
+# psycopg2 alone fails at boot with "No module named 'psycopg'".
 psycopg2-binary>=2.9
+psycopg[binary]>=3.1
 pydantic>=2.5
 httpx>=0.27
 python-dotenv>=1.0
