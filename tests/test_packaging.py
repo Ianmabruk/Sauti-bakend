@@ -142,3 +142,43 @@ class TestConnectionPool:
             raw = db.engine.raw_connection()
             raw.close()
             assert db.session.execute(text("select 1")).scalar() == 1
+
+
+class TestEnvPresenceReporting:
+    """/api/sauti/health must explain itself without leaking a credential.
+
+    "The engine says offline" is otherwise ambiguous between the variable
+    being absent, misspelled, saved but not yet deployed, or set but rejected
+    by the provider. Naming the variables that are present separates those
+    immediately.
+    """
+
+    def test_reports_a_boolean_per_expected_variable(self):
+        from backend.config.settings import get_settings
+
+        present = get_settings().env_presence()
+        assert "GROQ_API_KEY" in present
+        assert all(isinstance(v, bool) for v in present.values())
+
+    def test_never_returns_a_credential_value(self):
+        from backend.config.settings import get_settings
+
+        present = get_settings().env_presence()
+        # A value would make the repr longer than a boolean and could carry a
+        # secret prefix. Nothing here is ever longer than 5 characters.
+        assert all(len(str(v)) <= 5 for v in present.values())
+
+    def test_appears_in_the_public_summary(self):
+        from backend.config.settings import get_settings
+
+        assert "env_present" in get_settings().public_summary()
+
+    def test_absent_variable_is_reported_absent(self, monkeypatch):
+        from backend.config.settings import get_settings
+
+        monkeypatch.delenv("GROQ_API_KEY", raising=False)
+        get_settings(refresh=True)
+        try:
+            assert get_settings().env_presence()["GROQ_API_KEY"] is False
+        finally:
+            get_settings(refresh=True)

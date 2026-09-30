@@ -262,6 +262,34 @@ class Settings:
         # auto: an API key enables the keyed providers
         return bool(self.search_api_key)
 
+    def env_presence(self) -> dict:
+        """Report whether each expected variable is set, by name only.
+
+        Diagnosing "the engine says offline" otherwise means guessing between
+        the variable being absent, mistyped, saved but not deployed, or present
+        but rejected by the provider. Reporting the *presence* of each name
+        separates the first three immediately: a misspelled name is obvious
+        when the list names it, and an empty list when a variable is expected
+        but missing.
+
+        Only booleans are returned. No value, length or prefix of any
+        credential is exposed, so this stays safe to serve on a public
+        endpoint and to log.
+        """
+        expected = (
+            "GROQ_API_KEY",
+            "GROQ_MODEL",
+            "GROQ_STT_MODEL",
+            "GEMINI_API_KEY",
+            "LLM_API_KEY",
+            "SEARCH_API_KEY",
+            "DATABASE_URL",
+            "ALLOWED_ORIGINS",
+            "SECRET_KEY",
+            "ADMIN_TOKEN",
+        )
+        return {name: bool(os.environ.get(name, "").strip()) for name in expected}
+
     def public_summary(self) -> dict:
         """A safe-to-log view. Never includes credential values."""
         return {
@@ -277,6 +305,7 @@ class Settings:
             "search_configured": self.search_configured,
             "memory_enabled": self.memory_enabled,
             "enable_dangerous_tools": self.enable_dangerous_tools,
+            "env_present": self.env_presence(),
         }
 
 
