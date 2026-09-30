@@ -1,0 +1,106 @@
+# Render blueprint for the SautiPay backend.
+#
+# Deploy with: connect this repository in Render, choose "Blueprint", and it
+# reads this file. Postgres is provisioned and its connection string is wired
+# in automatically — you do not need to copy it anywhere.
+#
+# Before the first deploy, set the values marked `sync: false` in the Render
+# dashboard. Render will prompt for them.
+#
+# NOTE ON THE MODEL KEY: the provider is Groq (groq.com), not xAI Grok. The
+# variable is GROQ_API_KEY and a key from console.x.ai will be rejected. Get one
+# at https://console.groq.com/keys
+
+databases:
+  - name: sautipay-db
+    databaseName: sautipay
+    user: sautipay
+    plan: free
+    postgresMajorVersion: "16"
+
+services:
+  - type: web
+    name: sautipay-backend
+    runtime: python
+    plan: free
+    region: frankfurt
+
+    # Must be the repository root: the `ai` package is imported at request
+    # time and is not part of the installed distribution, so it has to be
+    # importable from the working directory.
+    rootDir: .
+
+    buildCommand: pip install --upgrade pip && pip install -e .
+    startCommand: gunicorn -w 2 -k gthread --threads 4 -b 0.0.0.0:$PORT --timeout 120 wsgi:app
+
+    healthCheckPath: /api/health
+
+    # Uploads survive only with a disk. Free tier disks are not available, so
+    # on the free plan uploaded media is lost on every restart and redeploy.
+    # Set `plan: starter` below and uncomment disk to persist it.
+    # disk:
+    #   name: sautipay-media
+    #   mountPath: /opt/render/project/src/instance/media
+    #   sizeGB: 1
+
+    envVars:
+      # --- Provided automatically from the database above ---
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sautipay-db
+          property: connectionString
+
+      - key: PYTHON_VERSION
+        value: "3.12.8"
+
+      # Must match the frontend's public origin, or the browser is blocked by
+      # CORS. Set this after the first frontend deploy, when you know its URL.
+      - key: ALLOWED_ORIGINS
+        sync: false
+
+      # --- Required. Set these in the dashboard before first deploy. ---
+
+      # Model provider key from https://console.groq.com/keys (NOT xAI).
+      - key: GROQ_API_KEY
+        sync: false
+
+      # Any long random string. Guards the /api/admin/* routes, which
+      # otherwise return 503. Clients send it as `X-Admin-Token`.
+      - key: ADMIN_TOKEN
+        generateValue: true
+
+      # `production` switches off debug output and the development server.
+      - key: FLASK_ENV
+        value: production
+
+      - key: SECRET_KEY
+        generateValue: true
+
+      # Web search backend for grounded answers and citations.
+      # `stub` returns canned results and is fine for a smoke test, but real
+      # answers with sources need a keyed provider: brave, tavily or serpapi.
+      # Get a key at https://brave.com/search/api/ (or the equivalent).
+      - key: SEARCH_PROVIDER
+        value: stub
+      - key: SEARCH_API_KEY
+        sync: false
+
+      # Speech to text for voice input. Defaults are fine.
+      - key: GROQ_MODEL
+        value: qwen/qwen3.8-27b
+      - key: GROQ_STT_MODEL
+        value: whisper-large-v3-turbo
+
+      # Keep under your Groq tier's output-tokens-per-minute limit. The free
+      # tier is 1000; asking for more returns a 429 for the whole request
+      # rather than truncating the answer.
+      - key: GROQ_MAX_TOKENS
+        value: "900"
+
+      # Required once a disk is attached; otherwise uploads go to ephemeral
+      # storage and disappear on restart.
+      - key: MEDIA_ROOT
+        value: instance/media
+
+      - key: LOG_LEVEL
+        value: INFO

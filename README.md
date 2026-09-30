@@ -144,12 +144,40 @@ python -m pytest tests/ -q
 The suite runs without network access: provider keys are stripped by an
 autouse fixture and HTTP is mocked.
 
-## Docker
+## Deploying to Render
+
+`render.yaml` is a Render blueprint: connect the repo in Render, choose
+**Blueprint**, and it provisions Postgres plus the web service with
+`DATABASE_URL` wired in automatically.
+
+| Variable | Must set | Notes |
+| --- | --- | --- |
+| `ALLOWED_ORIGINS` | yes | The frontend's public origin, e.g. `https://sauti-ai.onrender.com`. Set after the frontend deploys. |
+| `GROQ_API_KEY` | yes | From [console.groq.com](https://console.groq.com/keys). |
+| `SEARCH_API_KEY` | for real research | Any `SEARCH_PROVIDER` other than `stub`. |
+
+`ADMIN_TOKEN` and `SECRET_KEY` are generated for you. Tables are created on first
+boot: `wsgi.py` calls `db.create_all()` at import time.
+
+Deploy the **backend first**, then the frontend with this service's URL.
+
+Two things to know:
+
+- `alembic.ini` ships with a hardcoded Postgres URL that conflicts with the
+  SQLite default. The blueprint sets `DATABASE_URL` for the app itself; run
+  migrations with `flask db upgrade` rather than `alembic upgrade` if you need
+  them.
+- Free-tier disks do not exist, so uploaded media is lost on every restart. Add
+  a `disk` to the blueprint and use a paid plan if you need uploads to persist.
+
+### Other hosts
 
 ```bash
-docker compose up --build
+pip install -e .
+gunicorn -w 2 -k gthread --threads 4 -b 0.0.0.0:$PORT wsgi:app
 ```
 
-Brings up Postgres and the backend. Note the compose file still references the
-older Vite frontend in `sautipay/`; the current frontend is a separate
-repository and is not built by this file.
+The target is `wsgi:app`, not `backend.app:app` — that module only exports
+`create_app`, never a module-level `app`. The working directory must be the
+repository root, because the `ai` package is imported at request time and is not
+included in the installed distribution.
