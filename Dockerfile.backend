@@ -1,0 +1,20 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+COPY pyproject.toml ./
+# wsgi.py holds the module-level `app` callable that gunicorn loads, and `ai`
+# is imported at request time by backend/agent/orchestrator.py and
+# backend/services/llm.py. Neither is included in the installed distribution,
+# so both must be copied explicitly or the app fails to boot in the container.
+COPY wsgi.py ./
+COPY ai ./ai
+COPY backend ./backend
+
+RUN pip install --no-cache-dir -e .
+
+EXPOSE 8000
+
+# `backend.app:app` does not exist: that module only exports `create_app`.
+# The WSGI callable lives in wsgi.py.
+CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:8000", "wsgi:app"]

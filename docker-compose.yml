@@ -1,0 +1,58 @@
+version: "3.8"
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: sautipay-db
+    environment:
+      POSTGRES_DB: ${DB_NAME:-sautipay}
+      POSTGRES_USER: ${DB_USER:-sautipay}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-sautipay}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: sautipay-backend
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-sautipay}:${DB_PASSWORD:-sautipay}@db:5432/${DB_NAME:-sautipay}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?ADMIN_TOKEN must be set}
+      MEDIA_ROOT: /app/instance/media
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app/backend
+      - media_data:/app/instance/media
+    command: >
+      gunicorn -w 4 -b 0.0.0.0:8000 wsgi:app
+
+  frontend:
+    build:
+      context: ./sautipay
+      dockerfile: Dockerfile
+    container_name: sautipay-frontend
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: http://localhost:8000
+    volumes:
+      - ./sautipay:/app
+      - /app/node_modules
+    command: npm run dev
+
+volumes:
+  postgres_data:
+  media_data:

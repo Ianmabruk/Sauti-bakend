@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sautipay"
+version = "0.1.0"
+description = "Self-hosted Kenyan conversational intelligence platform"
+requires-python = ">=3.11"
+dependencies = [
+    "flask>=3.0",
+    # Already imported by backend/db.py; declared here so a clean install works.
+    "flask-sqlalchemy>=3.1",
+    "flask-migrate>=4.0",
+    "sqlalchemy>=2.0",
+    "alembic>=1.13",
+    "psycopg2-binary>=2.9",
+    # Request/response validation for the SAUTI API.
+    "pydantic>=2.5",
+    # Async HTTP client for web search and page reading.
+    "httpx>=0.27",
+    "python-dotenv>=1.0",
+    "gunicorn>=23.0",
+    "flask-limiter>=3.5",
+    "flask-talisman>=1.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=4.0",
+    "pytest-mock>=3.10",
+]
+
+# The JARVIS voice agent. Kept optional so the Flask app installs without any
+# audio stack. All four are free and open source; none require a paid plan.
+#   pip install -e ".[jarvis]"
+jarvis = [
+    # Typed configuration from the environment / .env file.
+    "pydantic-settings>=2.0",
+    # Microsoft Edge neural TTS. Free, no key required.
+    "edge-tts>=6.1",
+    # Google's VAD, compiled from source. Optional: jarvis falls back to a
+    # built-in energy detector when absent.
+    "webrtcvad>=2.0.10",
+    # PortAudio capture. Optional: jarvis falls back to the arecord binary,
+    # and then to text-only input, when absent or when libportaudio is missing.
+    "sounddevice>=0.4.6",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["backend*", "jarvis*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-ra"

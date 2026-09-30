@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment — never commit real keys
+.env
+.env.local
+.env.*.local
+# JARVIS persists conversation memory here.
+jarvis_state.json
+
+# Application data
+instance/
+*.db
+*.sqlite
+*.sqlite3
+
+# Uploads and generated media
+media/
+backend/instance/
+
+# Editors and OS
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
