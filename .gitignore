@@ -1,4 +1,4 @@
-# Python
+# --- Python ---------------------------------------------------------
 __pycache__/
 *.py[cod]
 *$py.class
@@ -17,24 +17,34 @@ htmlcov/
 venv/
 env/
 
-# Environment — never commit real keys
+# --- Environment — never commit real keys ---------------------------
 .env
 .env.local
 .env.*.local
 # JARVIS persists conversation memory here.
 jarvis_state.json
 
-# Application data
+# --- Application data -----------------------------------------------
 instance/
 *.db
 *.sqlite
 *.sqlite3
 
-# Uploads and generated media
-media/
-backend/instance/
+# --- Node / Next.js --------------------------------------------------
+node_modules/
+.pnp
+.pnp.js
+.next/
+out/
+next-env.d.ts.bak
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+coverage/
+*.tsbuildinfo
 
-# Editors and OS
+# --- Editors and OS --------------------------------------------------
 .DS_Store
 Thumbs.db
 *.swp
