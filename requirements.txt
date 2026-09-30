@@ -1,0 +1,29 @@
+# Render's Web Service build command is `pip install -r requirements.txt`, so
+# this file exists to satisfy that path.
+#
+# GENERATED FROM pyproject.toml — do not edit by hand.
+#
+# pyproject.toml is the source of truth. This file mirrors
+# [project].dependencies and nothing else: no dev extras, no jarvis extras.
+# The JARVIS voice stack in particular is deliberately absent, because it pulls
+# an audio stack the API server does not need.
+#
+# `pip install -e .` is the better command and is what render.yaml uses. It
+# reads pyproject directly and cannot drift. Use this file only when the build
+# command is fixed to a requirements file.
+#
+# tests/test_packaging.py asserts the two stay in sync, so a dependency added
+# to pyproject without mirroring it here fails the suite.
+
+flask>=3.0
+flask-sqlalchemy>=3.1
+flask-migrate>=4.0
+sqlalchemy>=2.0
+alembic>=1.13
+psycopg2-binary>=2.9
+pydantic>=2.5
+httpx>=0.27
+python-dotenv>=1.0
+gunicorn>=23.0
+flask-limiter>=3.5
+flask-talisman>=1.1
