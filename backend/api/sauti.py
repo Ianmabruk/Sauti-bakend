@@ -100,19 +100,37 @@ def sauti_chat():
 
     logger.info("SAUTI CHAT RECEIVED id=%s chars=%d", request_id, len(parsed.message))
 
-    conversation = conversation_service.get_or_create(parsed.conversation_id)
+    # Conversation storage is best-effort. A managed database can be
+    # suspended, unreachable or out of connections, and none of that should
+    # cost the caller their answer: the turn still works, it just cannot
+    # remember previous messages. Only the orchestrator call below is
+    # genuinely fatal, and that reports 502.
     try:
-        conversation_service.add_message(
-            conversation_id=conversation.id, role="user", content=parsed.message
-        )
+        conversation = conversation_service.get_or_create(parsed.conversation_id)
     except Exception as exc:  # noqa: BLE001 - storage must not break the reply
-        logger.error("Could not persist user message: %s", exc)
+        logger.error("Conversation store unavailable, continuing stateless: %s", exc)
+        conversation = None
+
+    conversation_id_for_turn = conversation.id if conversation is not None else None
+
+    if conversation is not None:
+        try:
+            conversation_service.add_message(
+                conversation_id=conversation.id, role="user", content=parsed.message
+            )
+        except Exception as exc:  # noqa: BLE001 - storage must not break the reply
+            logger.error("Could not persist user message: %s", exc)
 
     # Build history from the stored conversation so follow-ups actually
     # resolve. This route previously passed None, which made every turn
     # stateless even though the messages were being saved. Client-supplied
     # history is only used when there is no stored conversation to read.
-    history = _load_history(conversation.id)
+    history: list = []
+    if conversation is not None:
+        try:
+            history = _load_history(conversation.id)
+        except Exception as exc:  # noqa: BLE001 - storage must not break the reply
+            logger.error("Could not read conversation history: %s", exc)
 
     orchestrator = get_orchestrator()
 
@@ -123,7 +141,7 @@ def sauti_chat():
                 language_hint=parsed.language,
                 conversation_history=history or None,
                 user_id=parsed.user_id,
-                conversation_id=conversation.id,
+                conversation_id=conversation_id_for_turn,
                 use_tools=parsed.use_tools,
                 mode=parsed.mode,
                 user_location=parsed.user_location,
@@ -143,6 +161,8 @@ def sauti_chat():
         )
 
     try:
+        if conversation is None:
+            raise RuntimeError("conversation store unavailable")
         conversation_service.add_message(
             conversation_id=conversation.id,
             role="assistant",
@@ -155,7 +175,7 @@ def sauti_chat():
         logger.error("Could not persist assistant message: %s", exc)
 
     body = turn.to_dict()
-    body["conversation_id"] = conversation.id
+    body["conversation_id"] = conversation_id_for_turn
     body["request_id"] = request_id
     # Which provider was configured for this turn. It does not imply the
     # provider answered: when the call fails, `engine_ok` is False and
