@@ -17,4 +17,12 @@ EXPOSE 8000
 
 # `backend.app:app` does not exist: that module only exports `create_app`.
 # The WSGI callable lives in wsgi.py.
-CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:8000", "wsgi:app"]
+#
+# PORT comes from the platform. Render, Heroku and most PaaS providers set it,
+# and the app must bind that exact value or the health check never passes and
+# traffic is refused. gthread workers are used because the orchestrator calls
+# asyncio.run() from synchronous request handling, which needs a real thread
+# rather than a blocking worker loop.
+ARG PORT=8000
+ENV PORT=${PORT}
+CMD ["sh", "-c", "gunicorn -w 2 -k gthread --threads 4 -b 0.0.0.0:${PORT} --timeout 120 wsgi:app"]

@@ -10,13 +10,12 @@
 # NOTE ON THE MODEL KEY: the provider is Groq (groq.com), not xAI Grok. The
 # variable is GROQ_API_KEY and a key from console.x.ai will be rejected. Get one
 # at https://console.groq.com/keys
-
-databases:
-  - name: sautipay-db
-    databaseName: sautipay
-    user: sautipay
-    plan: free
-    postgresMajorVersion: "16"
+#
+# NOTE ON THE DATABASE: supply your own managed Postgres (Neon, Supabase,
+# RDS...) by setting DATABASE_URL below. No database is provisioned here, so
+# nothing in this file holds credentials. The default DATABASE_URL in
+# backend/config is a SQLite file, which a PaaS filesystem wipes on every
+# restart — never rely on it in production.
 
 services:
   - type: web
@@ -44,11 +43,12 @@ services:
     #   sizeGB: 1
 
     envVars:
-      # --- Provided automatically from the database above ---
+      # --- Required: your own Postgres. ---
+      # Full Neon/Supabase/RDS URL including credentials, e.g.
+      # postgresql://USER:PASSWORD@HOST/DB?sslmode=require
+      # Never commit this value; set it in the Render dashboard only.
       - key: DATABASE_URL
-        fromDatabase:
-          name: sautipay-db
-          property: connectionString
+        sync: false
 
       - key: PYTHON_VERSION
         value: "3.12.8"
