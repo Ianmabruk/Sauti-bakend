@@ -15,6 +15,39 @@ except ImportError:  # pragma: no cover - python-dotenv is a declared dependency
     pass
 
 
+#: Used when ALLOWED_ORIGINS is unset. Local development only.
+_DEV_ORIGINS = "http://localhost:5173,http://localhost:3000"
+
+
+def parse_allowed_origins(raw: str) -> list[str]:
+    """Turn a comma-separated ALLOWED_ORIGINS value into a clean origin list.
+
+    Normalisation matters more than it looks. A browser sends the ``Origin``
+    header as a scheme, host and port and nothing else: no trailing slash, ever.
+    An entry written as ``https://app.example.com/`` therefore never matches and
+    silently removes that origin from the allowlist, which surfaces to the user
+    only as an opaque CORS error indistinguishable from a mistyped hostname.
+
+    Trailing slashes are stripped, surrounding whitespace is removed, empty
+    entries are dropped, and any wildcard entry is rejected rather than being
+    quietly honoured.
+    """
+    origins: list[str] = []
+    for candidate in raw.split(","):
+        origin = candidate.strip().rstrip("/")
+        if not origin:
+            continue
+        if origin == "*":
+            # A wildcard would hand every site on the internet access to a
+            # provider-keyed API. Refuse it here where the operator sees why.
+            raise ValueError(
+                "ALLOWED_ORIGINS must not contain '*'. List each origin "
+                "explicitly, e.g. https://app.example.com"
+            )
+        origins.append(origin)
+    return origins
+
+
 class Config:
     """Base configuration from environment variables."""
 
@@ -38,13 +71,11 @@ class Config:
     RATE_LIMIT_PER_MINUTE = int(os.environ.get("RATE_LIMIT_PER_MINUTE", "60"))
     RATE_LIMIT_STORAGE = os.environ.get("RATE_LIMIT_STORAGE", "memory://")
 
-    # CORS
-    ALLOWED_ORIGINS = [
-        o.strip()
-        for o in os.environ.get(
-            "ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:3000"
-        ).split(",")
-    ]
+    # CORS. Parsed through parse_allowed_origins so a trailing slash or stray
+    # whitespace cannot silently drop an origin. See the note there.
+    ALLOWED_ORIGINS = parse_allowed_origins(
+        os.environ.get("ALLOWED_ORIGINS", _DEV_ORIGINS)
+    )
 
     # Logging
     LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")
@@ -91,6 +122,44 @@ class ProductionConfig(Config):
     DEBUG = False
     TESTING = False
 
+    # A public API is called from a browser, and a browser enforces CORS. With
+    # ALLOWED_ORIGINS unset the base class falls back to localhost, so the
+    # service boots, passes its health check, looks healthy, and then refuses
+    # every real frontend with nothing but an opaque console error on the
+    # client. Refusing to start turns that into a failed deploy with a message
+    # naming the variable, which is far cheaper to diagnose.
+    #
+    # The check lives in validate_production(), not here. A class body is
+    # executed at import time, so raising from it would abort `import
+    # backend.config.base` for every environment, including local development.
+    @classmethod
+    def validate_production(cls) -> None:
+        """Refuse to run production with unsafe configuration.
+
+        Called from get_config() only when FLASK_ENV selects this class.
+        """
+        # Set it to a comma-separated list of exact origins, for example:
+        #   ALLOWED_ORIGINS=https://app.example.com,https://www.example.com
+        if not os.environ.get("ALLOWED_ORIGINS", "").strip():
+            raise RuntimeError(
+                "ALLOWED_ORIGINS is required in production. Without it every "
+                "browser request is refused by CORS while the service still "
+                "passes its health check. Set ALLOWED_ORIGINS to a "
+                "comma-separated list of exact origins, e.g. "
+                "https://app.example.com"
+            )
+
+        # Same reasoning for the session signing key. The base default is a
+        # public constant, and anything Flask signs with it is forgeable.
+        if (
+            os.environ.get("SECRET_KEY", "dev-secret-change-me")
+            == "dev-secret-change-me"
+        ):
+            raise RuntimeError(
+                "SECRET_KEY is required in production and must not be the "
+                "development default. Set it to a long random string."
+            )
+
 
 config_map = {
     "development": DevelopmentConfig,
@@ -101,6 +170,17 @@ config_map = {
 
 
 def get_config() -> type:
-    """Return the appropriate config class based on FLASK_ENV."""
+    """Return the appropriate config class based on FLASK_ENV.
+
+    Production configuration is validated here rather than at import, so that
+    a missing variable fails the deploy that needs it instead of breaking every
+    local import of this module.
+    """
     env = os.environ.get("FLASK_ENV", "default")
-    return config_map.get(env, Config)
+    config = config_map.get(env, Config)
+
+    validate = getattr(config, "validate_production", None)
+    if callable(validate):
+        validate()
+
+    return config

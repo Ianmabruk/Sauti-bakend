@@ -283,7 +283,11 @@ class ResearchPipeline:
             for s in final_sources
         ]
 
-        observations, conflicts = _extract_observations(final_sources, search_query)
+        observations, conflicts = _extract_observations(
+            final_sources,
+            search_query,
+            self.settings.research_max_observations,
+        )
         step("extracted", f"observations={len(observations)} conflicts={len(conflicts)}")
 
         return ResearchResult(
@@ -319,19 +323,36 @@ _DATE_IN_TEXT = re.compile(
 )
 
 
-def _extract_observations(sources: list[Source], query: str) -> tuple[list[dict], list[dict]]:
+def _extract_observations(
+    sources: list[Source], query: str, max_observations: int = 12
+) -> tuple[list[dict], list[dict]]:
     """Pull prices/dates out of source text to support grounded reporting.
 
     This is intentionally conservative: it only reports figures that literally
     appear in the retrieved text, and keeps the surrounding context so the
     model does not report a number out of context.
+
+    The count is capped. Every extra observation adds its context window to the
+    tool payload, and that payload is replayed into the model on every
+    subsequent turn of the tool loop. A page dense with figures could produce
+    dozens of observations, which grows the prompt until the provider rejects
+    the request on input tokens per minute — and the research is then thrown
+    away along with the answer it was gathered for. The cap keeps the useful
+    early matches, which is where the headline figure lives.
     """
+    cap = max(1, max_observations)
     observations: list[dict] = []
     conflicts: list[dict] = []
 
     for source in sources:
+        if len(observations) >= cap:
+            break
+
         haystack = f"{source.snippet}\n{source.content[:6000]}"
         for match in _PRICE_RE.finditer(haystack):
+            if len(observations) >= cap:
+                break
+
             context = haystack[max(0, match.start() - 90) : match.end() + 90]
             observations.append(
                 {

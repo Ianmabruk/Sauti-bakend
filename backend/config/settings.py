@@ -175,6 +175,14 @@ class Settings:
     search_max_pages_to_read: int = field(
         default_factory=lambda: _env_int("SEARCH_MAX_PAGES_TO_READ", 4)
     )
+    # Hard ceiling on extracted price/date observations. Each one carries its
+    # surrounding context into the tool payload, and that payload is replayed
+    # into the model on every later turn of the tool loop. Unbounded, a
+    # figure-dense page produced enough context to trip the provider's
+    # input-tokens-per-minute limit, discarding the research and the answer.
+    research_max_observations: int = field(
+        default_factory=lambda: _env_int("RESEARCH_MAX_OBSERVATIONS", 12)
+    )
 
     # --- Page reader ------------------------------------------------------
     reader_timeout: float = field(default_factory=lambda: _env_float("READER_TIMEOUT", 12.0))
@@ -242,9 +250,12 @@ class Settings:
 
     @property
     def search_configured(self) -> bool:
-        """True when at least one search provider has the credentials it needs."""
+        """True when the configured search provider has what it needs to run."""
         provider = (self.search_provider or "auto").lower()
-        if provider == "stub":
+        if provider in {"stub", "duckduckgo"}:
+            # Both are keyless. DuckDuckGo scrapes a public HTML endpoint, so
+            # it needs no credential and was wrongly reported as unavailable
+            # purely because it was not named here.
             return True
         if provider in {"brave", "tavily", "serpapi"}:
             return bool(self.search_api_key)
