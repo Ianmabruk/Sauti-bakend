@@ -48,6 +48,46 @@ def parse_allowed_origins(raw: str) -> list[str]:
     return origins
 
 
+def origin_is_allowed(origin: str, allowed: list[str]) -> bool:
+    """True when ``origin`` matches an entry in the allowlist.
+
+    Matching is exact, case-insensitive on scheme and host, and supports one
+    wildcard form: ``https://*.netlify.app``. Static hosts issue a different
+    hostname for every branch and deploy preview, so an exact-match-only list
+    has to be edited every time one is opened; the wildcard keeps those
+    working while still pinning the scheme and the registrable domain.
+
+    A bare ``*`` is deliberately not supported. This API spends a provider key
+    on every call, so the allowlist stays explicit.
+    """
+    if not origin:
+        return False
+
+    candidate = origin.strip().rstrip("/").lower()
+
+    for entry in allowed:
+        pattern = entry.strip().rstrip("/").lower()
+
+        if pattern == candidate:
+            return True
+
+        if pattern.startswith("*.") or "://*." in pattern:
+            # Split into scheme and suffix, then require a label before the
+            # suffix. A bare "*" must never match, so the subdomain has to be
+            # present and non-empty.
+            scheme, _, suffix = pattern.rpartition("://")
+            if not suffix.startswith("*."):
+                continue
+            base = suffix[2:]
+            prefix = f"{scheme}://" if scheme else ""
+            if candidate.startswith(prefix) and candidate.endswith("." + base):
+                middle = candidate[len(prefix) : -(len(base) + 1)]
+                if middle and "." not in middle and "/" not in middle:
+                    return True
+
+    return False
+
+
 class Config:
     """Base configuration from environment variables."""
 

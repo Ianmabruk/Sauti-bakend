@@ -7,7 +7,23 @@ from functools import wraps
 
 from flask import Flask, request, current_app, jsonify
 
+from .config.base import origin_is_allowed
+
 logger = logging.getLogger(__name__)
+
+#: Origins already reported, so a deployment-wide misconfiguration produces one
+#: line per distinct origin instead of one per preflight request.
+_REJECTED_ORIGINS: set[tuple[str, tuple[str, ...]]] = set()
+_MAX_LOGGED_REJECTIONS = 50
+
+
+def _log_rejected_origin(origin: str, allowed: tuple[str, ...]) -> bool:
+    """True the first time this origin/allowlist pair is seen."""
+    key = (origin, allowed)
+    if key in _REJECTED_ORIGINS or len(_REJECTED_ORIGINS) >= _MAX_LOGGED_REJECTIONS:
+        return False
+    _REJECTED_ORIGINS.add(key)
+    return True
 
 
 def _resolve_admin_token() -> str:
@@ -87,16 +103,27 @@ def register_security_hooks(app: Flask) -> None:
 
         origin = request.headers.get("Origin")
         allowed_origins = app.config.get("ALLOWED_ORIGINS", [])
-        # Exact match only. The Origin header is scheme, host and port with no
-        # trailing slash, and parse_allowed_origins strips trailing slashes
-        # from the configured side so the two compare cleanly.
-        if origin and origin in allowed_origins:
+
+        if origin and origin_is_allowed(origin, allowed_origins):
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Admin-Token"
             response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
             # Without this a shared cache can serve one origin's response to
             # another, which strips the header from the wrong caller.
             response.headers["Vary"] = "Origin"
+        elif origin:
+            # A rejected origin is otherwise invisible: the browser reports an
+            # opaque CORS failure and the server logs nothing, so the cause has
+            # to be guessed at from the client side. Rate limited because a
+            # misconfigured deployment would otherwise emit one line per
+            # preflight from every asset request.
+            if _log_rejected_origin(origin, tuple(allowed_origins)):
+                logger.warning(
+                    "CORS rejected origin %s. It is not in ALLOWED_ORIGINS=%s. "
+                    "Add it to that variable and restart.",
+                    origin,
+                    ",".join(allowed_origins),
+                )
 
         if request.method == "OPTIONS":
             response.status_code = 204

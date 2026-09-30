@@ -220,3 +220,131 @@ class TestObservationCap:
         from backend.config.settings import Settings
 
         assert 0 < Settings().research_max_observations <= 50
+
+
+class TestOriginMatching:
+    """Matching rules for the allowlist, including the wildcard form."""
+
+    ALLOWED = [
+        "https://sautiai1.netlify.app",
+        "https://*.netlify.app",
+        "http://localhost:3000",
+    ]
+
+    @pytest.mark.parametrize(
+        "origin",
+        [
+            "https://sautiai1.netlify.app",
+            "https://sautiai1.netlify.app/",
+            "HTTPS://SAUTIAI1.NETLIFY.APP",
+            "http://localhost:3000",
+            # A Netlify deploy preview gets a fresh hostname on every branch.
+            "https://deploy-preview-7a3.netlify.app",
+        ],
+    )
+    def test_allowed(self, origin):
+        from backend.config.base import origin_is_allowed
+
+        assert origin_is_allowed(origin, self.ALLOWED) is True
+
+    @pytest.mark.parametrize(
+        "origin",
+        [
+            "https://evil.example.com",
+            # Bare registrable domain: the wildcard must require a subdomain.
+            "https://netlify.app",
+            # Suffix confusion, the classic way a naive endswith() goes wrong.
+            "https://evil.netlify.app.evil.com",
+            # Deep subdomains are not covered by a one-label wildcard.
+            "https://a.b.netlify.app",
+            # Scheme is part of an origin and is not wildcarded.
+            "http://sautiai1.netlify.app",
+            # Port is part of an origin too.
+            "https://sautiai1.netlify.app:8443",
+            "*",
+            "",
+        ],
+    )
+    def test_rejected(self, origin):
+        from backend.config.base import origin_is_allowed
+
+        assert origin_is_allowed(origin, self.ALLOWED) is False
+
+    def test_exact_match_still_works_without_any_wildcard(self):
+        from backend.config.base import origin_is_allowed
+
+        allowed = ["https://app.example.com"]
+        assert origin_is_allowed("https://app.example.com", allowed) is True
+        assert origin_is_allowed("https://other.example.com", allowed) is False
+
+    def test_empty_allowlist_rejects_everything(self):
+        from backend.config.base import origin_is_allowed
+
+        assert origin_is_allowed("https://app.example.com", []) is False
+
+
+class TestRejectedOriginIsLogged:
+    """A rejected origin must be visible in the server log.
+
+    The browser reports an opaque CORS failure and the client cannot know why.
+    Without a server-side log the only clue is the allowed list, which the
+    operator has to guess at. These tests patch the logger rather than using
+    caplog, because create_app reconfigures logging and detaches pytest's
+    handler from the backend.security logger.
+    """
+
+    def test_dedupe_helper_reports_each_origin_once(self):
+        from backend.security import _log_rejected_origin
+
+        allowed = ("https://ok.example",)
+        assert _log_rejected_origin("https://a.example", allowed) is True
+        assert _log_rejected_origin("https://a.example", allowed) is False
+        assert _log_rejected_origin("https://b.example", allowed) is True
+
+    def test_rejection_emits_a_warning_naming_the_variable(self, monkeypatch):
+        from unittest import mock
+
+        from backend.app import create_app
+        from backend.config.base import Config
+
+        cfg = type("_Cfg", (Config,), {"ALLOWED_ORIGINS": ["https://ok.example"]})
+        client = create_app(cfg).test_client()
+
+        with mock.patch("backend.security.logger") as logger:
+            client.options(
+                "/api/health",
+                headers={
+                    "Origin": "https://nope.example",
+                    "Access-Control-Request-Method": "GET",
+                },
+            )
+
+        warnings = [
+            call.args[0] % call.args[1:] if len(call.args) > 1 else call.args[0]
+            for call in logger.warning.call_args_list
+        ]
+        joined = " ".join(str(w) for w in warnings)
+        assert "CORS rejected origin" in joined
+        assert "nope.example" in joined
+        assert "ALLOWED_ORIGINS" in joined
+
+    def test_allowed_origin_does_not_warn(self, monkeypatch):
+        from unittest import mock
+
+        from backend.app import create_app
+        from backend.config.base import Config
+
+        cfg = type("_Cfg", (Config,), {"ALLOWED_ORIGINS": ["https://ok.example"]})
+        client = create_app(cfg).test_client()
+
+        with mock.patch("backend.security.logger") as logger:
+            client.options(
+                "/api/health",
+                headers={
+                    "Origin": "https://ok.example",
+                    "Access-Control-Request-Method": "GET",
+                },
+            )
+
+        joined = " ".join(str(c) for c in logger.warning.call_args_list)
+        assert "CORS rejected" not in joined
