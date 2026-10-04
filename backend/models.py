@@ -28,9 +28,21 @@ class User(db.Model, TimestampMixin):
 
     id = db.Column(db.String, primary_key=True, default=generate_uuid)
     phone_number = db.Column(db.String(20), unique=True, nullable=True)
+    email = db.Column(db.String(255), unique=True, nullable=True)
+    password_hash = db.Column(db.String(255), nullable=True)
     name = db.Column(db.String(255), nullable=True)
     language_preference = db.Column(db.String(10), nullable=True)
     is_active = db.Column(db.Boolean, default=True, nullable=False)
+
+    #: SHA-256 of the secret that authorises vendor-token issuance for this user.
+    #:
+    #: Nullable on purpose. A user who has never requested a token has no secret
+    #: yet, and NULL is what distinguishes "may be issued a first secret" from
+    #: "must present the secret it already has". Storing the digest rather than the
+    #: secret means a database dump does not hand over live billing credentials.
+    #:
+    #: See :mod:`backend.payments.auth` for why this exists.
+    vendor_token_hash = db.Column(db.String(64), nullable=True)
 
     conversations = db.relationship("Conversation", back_populates="user", cascade="all, delete-orphan")
     media_assets = db.relationship("MediaAsset", back_populates="uploaded_by")

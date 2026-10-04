@@ -53,6 +53,11 @@ def create_app(config_object: type = Config) -> Flask:
     app = Flask(__name__)
     app.config.from_object(config_object)
 
+    @app.get("/")
+    def index():
+        """Serve a basic root response for smoke checks and Render health probes."""
+        return {"status": "ok", "service": "sautipay", "message": "API is running"}
+
     configure_logging(app.config.get("LOG_LEVEL", "INFO"))
 
     # Database

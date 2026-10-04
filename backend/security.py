@@ -106,7 +106,13 @@ def register_security_hooks(app: Flask) -> None:
 
         if origin and origin_is_allowed(origin, allowed_origins):
             response.headers["Access-Control-Allow-Origin"] = origin
-            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Admin-Token"
+            # X-Vendor-Token carries the vendor bearer token issued by
+            # /api/payments/vendor/token. Listed here so a browser preflight for
+            # the payment routes succeeds; without it the request never leaves
+            # the browser and the failure looks like a backend outage.
+            response.headers["Access-Control-Allow-Headers"] = (
+                "Content-Type, Authorization, X-Admin-Token, X-Vendor-Token"
+            )
             response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
             # Without this a shared cache can serve one origin's response to
             # another, which strips the header from the wrong caller.

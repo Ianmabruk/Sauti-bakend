@@ -154,7 +154,7 @@ class Settings:
     )
     #: Per-session ceiling on AI turns, enforced in the API layer.
     sauti_chat_rate_limit: str = field(
-        default_factory=lambda: os.environ.get("SAUTI_CHAT_RATE_LIMIT", "30 per minute")
+        default_factory=lambda: os.environ.get("SAUTI_CHAT_RATE_LIMIT", "40 per minute")
     )
     #: Optional model list for the intent/intent-bias phase.
     sauti_mode_default: str = field(

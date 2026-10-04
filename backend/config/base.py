@@ -177,6 +177,81 @@ class Config:
     )
     MAX_CONTENT_LENGTH = int(os.environ.get("MAX_CONTENT_LENGTH", str(50 * 1024 * 1024)))
 
+    # ------------------------------------------------------------------
+    # Paystack (vendor subscriptions)
+    # ------------------------------------------------------------------
+    # The secret key is read here and nowhere else in the backend: it is used
+    # only to sign requests to Paystack and to verify webhook signatures, and
+    # it is never written to a response body, a log line or an error message.
+    # No frontend-facing code may import it. See backend/payments/paystack.py.
+    #
+    # These are read once, at class-body evaluation time, exactly like
+    # DATABASE_URL and SECRET_KEY above. That is fine for a key that never
+    # changes within a process, and it keeps the module import-order rules the
+    # rest of this file already depends on.
+    PAYSTACK_SECRET_KEY = os.environ.get("PAYSTACK_SECRET_KEY", "")
+    PAYSTACK_PUBLIC_KEY = (
+        os.environ.get("PAYSTACK_PUBLIC_KEY")
+        or os.environ.get("NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY")
+        or os.environ.get("REACT_APP_PAYSTACK_PUBLIC_KEY")
+        or ""
+    )
+    PAYSTACK_API_URL = os.environ.get(
+        "PAYSTACK_API_URL", "https://api.paystack.co"
+    ).rstrip("/")
+    PAYSTACK_TIMEOUT = float(os.environ.get("PAYSTACK_TIMEOUT", "15"))
+
+    # The Paystack Test Mode plan code (PLN_...). Empty until the plan is
+    # actually created in the Test dashboard; the payments service refuses to
+    # initialize a checkout without one rather than guessing.
+    PAYSTACK_PLAN_CODE = (
+        os.environ.get("PAYSTACK_PLAN_CODE")
+        or os.environ.get("NEXT_PUBLIC_PAYSTACK_PLAN_CODE")
+        or os.environ.get("REACT_APP_PAYSTACK_PLAN_CODE")
+        or ""
+    )
+
+    # Application-level abuse controls. These bound how often one caller can
+    # spin up checkout sessions, which is the Sauti-side defence against
+    # payment-spam; card-level risk stays with Paystack.
+    PAYSTACK_INIT_RATE_LIMIT = os.environ.get(
+        "PAYSTACK_INIT_RATE_LIMIT", "5 per minute"
+    )
+    PAYSTACK_VERIFY_RATE_LIMIT = os.environ.get(
+        "PAYSTACK_VERIFY_RATE_LIMIT", "20 per minute"
+    )
+    PAYSTACK_TOKEN_RATE_LIMIT = os.environ.get(
+        "PAYSTACK_TOKEN_RATE_LIMIT", "10 per minute"
+    )
+
+    # A checkout session left un-paid inside this window is reused rather than
+    # replaced, so a double click on Subscribe does not orphan a reference.
+    PAYSTACK_REUSE_WINDOW_SECONDS = int(
+        os.environ.get("PAYSTACK_REUSE_WINDOW_SECONDS", "900")
+    )
+    # How long an issued vendor token stays valid.
+    PAYSTACK_TOKEN_TTL_SECONDS = int(
+        os.environ.get("PAYSTACK_TOKEN_TTL_SECONDS", "604800")
+    )
+
+    # Set to "true" only when the secret key is a live key AND the deployment
+    # is genuinely live. While this is false a live key is refused at request
+    # time, so a paste accident cannot start charging real money. See
+    # backend/payments/paystack.py:assert_paystack_mode.
+    PAYSTACK_ALLOW_LIVE = os.environ.get("PAYSTACK_ALLOW_LIVE", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+    # The frontend's public origin, e.g. https://sauti-ai.onrender.com. Used to
+    # build the URL Paystack returns the customer to after checkout. Read from
+    # configuration rather than derived from the request's Origin header, which
+    # is attacker-controlled: deriving it would let a caller redirect a paying
+    # customer to a page on their own domain.
+    PUBLIC_SITE_URL = os.environ.get("PUBLIC_SITE_URL", "").strip()
+
     # SQL
     SQLALCHEMY_DATABASE_URI = DATABASE_URL
     SQLALCHEMY_TRACK_MODIFICATIONS = False
@@ -207,6 +282,19 @@ class TestingConfig(Config):
     # creation.
     SQLALCHEMY_ENGINE_OPTIONS = parse_pool_options(DATABASE_URL)
     ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "test-admin-token")
+
+    # Paystack placeholders. These are deliberately all-zero sentinels, not
+    # credentials: Paystack never issues a key whose body is 32 zeros, so these
+    # cannot authenticate against any account even if a test escaped the
+    # sandbox and reached the real API. Tests monkeypatch the HTTP layer rather
+    # than the key, but the payment code still needs *a* key present to take the
+    # test-mode branch instead of the disabled one.
+    PAYSTACK_SECRET_KEY = os.environ.get(
+        "PAYSTACK_SECRET_KEY", "sk_test_" + "0" * 32
+    )
+    PAYSTACK_PUBLIC_KEY = os.environ.get("PAYSTACK_PUBLIC_KEY", "pk_test_" + "0" * 32)
+    PAYSTACK_PLAN_CODE = os.environ.get("PAYSTACK_PLAN_CODE", "PLN_test0000000000")
+    PAYSTACK_ALLOW_LIVE = False
 
 
 class ProductionConfig(Config):

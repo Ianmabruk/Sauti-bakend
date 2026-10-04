@@ -25,4 +25,4 @@ EXPOSE 8000
 # rather than a blocking worker loop.
 ARG PORT=8000
 ENV PORT=${PORT}
-CMD ["sh", "-c", "gunicorn -w 2 -k gthread --threads 4 -b 0.0.0.0:${PORT} --timeout 120 wsgi:app"]
+CMD ["sh", "-c", "gunicorn -w 4 -k gthread --threads 10 -b 0.0.0.0:${PORT} --timeout 120 wsgi:app"]

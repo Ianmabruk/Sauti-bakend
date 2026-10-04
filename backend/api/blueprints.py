@@ -1,6 +1,7 @@
 """API blueprint registration for SautiPay / SAUTI."""
 from flask import Flask
 
+from .auth import auth_bp
 from .chat import chat_bp
 from .health import health_bp
 from .intents import intents_bp
@@ -21,6 +22,7 @@ def register_blueprints(app: Flask) -> None:
     Args:
         app: The Flask application instance.
     """
+    app.register_blueprint(auth_bp, url_prefix="/api")
     app.register_blueprint(health_bp, url_prefix="/api")
     app.register_blueprint(chat_bp, url_prefix="/api")
     app.register_blueprint(sauti_bp, url_prefix="/api")
@@ -30,6 +32,11 @@ def register_blueprints(app: Flask) -> None:
     app.register_blueprint(memory_bp, url_prefix="/api")
     app.register_blueprint(marketplace_bp, url_prefix="/api")
     app.register_blueprint(tools_bp, url_prefix="/api")
+
+    # Paystack vendor subscriptions. Additive: no existing route changes.
+    from .payments import payments_bp
+
+    app.register_blueprint(payments_bp, url_prefix="/api")
 
     # SautiPay frontend content system (preserved from the previous phase).
     from .admin_ops import admin_ops_bp

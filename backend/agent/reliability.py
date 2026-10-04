@@ -136,6 +136,8 @@ def build_rewrite_prompt(
         f"- If the request is location-dependent, include the location "
         f"('{city}', {country}) unless one is already named.\n"
         f"- If the request is time-sensitive, include the year {year}.\n"
+        "- Preserve weather, forecast, temperature, rain and similar live-data intent; "
+        "do not strip it down to a bare city name.\n"
         "- Keep the user's own language words if they help retrieval.\n"
         "- Do not add a place name that the question does not support.\n"
         "- Three to eight words. Not a sentence, not a question.\n"
@@ -144,6 +146,39 @@ def build_rewrite_prompt(
         f"Request to rewrite: {raw_query}\n\n"
         "Rewritten query:"
     )
+
+
+def _normalise_weather_rewrite(question: str, rewritten: str) -> str:
+    """Keep live-weather intent when a model strips the query to a bare city."""
+    cleaned = (rewritten or "").strip()
+    if not cleaned:
+        return cleaned
+
+    if re.search(r"\b(weather|forecast|temperature|rain|humidity|wind|meteo|hali ya hewa)\b", cleaned, re.I):
+        return cleaned
+
+    if not question or not re.search(
+        r"\b(weather|forecast|temperature|rain|humidity|wind|meteo|hali ya hewa)\b",
+        question,
+        re.I,
+    ):
+        return cleaned
+
+    location_match = re.search(
+        r"\b(?:in|for|at|near)\s+([A-Za-z][A-Za-z\s'-]{1,40})(?=\s*(?:today|tomorrow|now|this week|this month|forecast|weather|report|$))",
+        question,
+        re.I,
+    ) or re.search(
+        r"\b(?:in|for|at|near)\s+([A-Za-z][A-Za-z\s'-]{1,40})$",
+        question,
+        re.I,
+    )
+    location = (location_match.group(1) if location_match else cleaned).strip(" ,.-")
+    if not location:
+        return cleaned
+
+    prefix = "weather forecast" if "forecast" in question.lower() else "weather"
+    return f"{prefix} in {location}"
 
 
 async def rewrite_query(
@@ -197,7 +232,7 @@ async def rewrite_query(
     # A model that rambles must not be allowed to become the search query.
     if not rewritten or len(rewritten) > 200 or "\n" in rewritten:
         return cleaned
-    return rewritten
+    return _normalise_weather_rewrite(question, rewritten)
 
 
 #: Domain suffixes reserved by RFC 2606 / RFC 6761 that can never resolve to

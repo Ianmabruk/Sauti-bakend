@@ -1,0 +1,181 @@
+# Render blueprint for the SautiPay backend.
+#
+# Deploy with: connect this repository in Render, choose "Blueprint", and it
+# reads this file. Render prompts for the three `sync: false` values before the
+# first deploy.
+#
+# Two things to know before you start:
+#
+#   1. The model provider is GROQ (groq.com), not xAI Grok. The variable is
+#      GROQ_API_KEY. A key from console.x.ai will be rejected — there is no
+#      xAI integration in this codebase.
+#   2. Dependencies are declared in pyproject.toml, not requirements.txt.
+#      `pip install -e .` is what installs them. The `ai` package is imported
+#      at request time and is deliberately excluded from the installed
+#      distribution, which is why rootDir is the repository root and why gunicorn
+#      must be started from there.
+
+services:
+  - type: web
+    name: sautipay-backend
+    runtime: python
+    plan: free
+    region: frankfurt
+
+    rootDir: .
+
+    buildCommand: pip install --upgrade pip && pip install -e .
+    # `alembic upgrade head` runs before gunicorn starts, not in buildCommand,
+    # because the database is not reachable at build time.
+    #
+    # It has to run here rather than being left to `create_all()` in wsgi.py.
+    # create_all() only ever creates tables that do not exist yet: it cannot add
+    # a column to a table that is already there, so deploying migration 0005 to a
+    # database that already has the earlier tables would leave those tables
+    # untouched. The service would then boot healthy against a schema it does not
+    # match, and the first webhook INSERT would fail on the missing column —
+    # losing the one event that activates a paid subscription.
+    #
+    # Running it in startCommand rather than preDeployCommand is deliberate: it is
+    # not ignored on any plan tier, and because it precedes gunicorn there is only
+    # one process altering the schema. It is idempotent, so a restart costs one
+    # no-op "already at head".
+    startCommand: >-
+      alembic upgrade head &&
+      gunicorn wsgi:app
+      --bind 0.0.0.0:$PORT
+      --workers 4
+      --worker-class gthread
+      --threads 10
+      --timeout 120
+      --access-logfile -
+      --error-logfile -
+
+    # /api/health, not /health. There is no bare /health route in this app;
+    # pointing Render at one returns 404 and the deploy fails.
+    healthCheckPath: /api/health
+
+    # Render restarts the container after roughly 50 minutes of no inbound
+    # traffic. A free-tier idle web service cannot answer a health check while
+    # it sleeps, so pinning this off avoids a "deploy failed" on a service that
+    # is merely idle. Turn it back on once you have a paid instance.
+    autoDeploy: true
+
+    # Uploads survive only with a disk. Free tier disks are not available, so
+    # on the free plan anything uploaded under instance/media is lost on every
+    # restart and redeploy. Switch plan to starter and uncomment to persist.
+    # disk:
+    #   name: sautipay-media
+    #   mountPath: /opt/render/project/src/instance/media
+    #   sizeGB: 1
+
+    envVars:
+      # --- Required: your own managed Postgres ---------------------------
+      # Neon, Supabase or RDS. Full URL with credentials and sslmode.
+      # Never commit this value; set it in the Render dashboard only.
+      # The application default is a SQLite file, and a PaaS filesystem wipes
+      # that on every restart, so this must be a real database in production.
+      - key: DATABASE_URL
+        sync: false
+
+      # --- Required: the model provider -----------------------------------
+      # From https://console.groq.com/keys
+      - key: GROQ_API_KEY
+        sync: false
+
+      # --- Required: the frontend's public origin --------------------------
+      # Comma-separated. Set this after the frontend deploys, then save.
+      # No rebuild is needed for this one; it is read at request time.
+      - key: ALLOWED_ORIGINS
+        sync: false
+
+      # --- Optional: real web search for citations --------------------------
+      # Leave SEARCH_PROVIDER at stub and answers still work, but research
+      # returns canned results and no sources are cited. For live citations
+      # use brave, tavily or serpapi and supply a key.
+      - key: SEARCH_PROVIDER
+        value: stub
+      - key: SEARCH_API_KEY
+        sync: false
+
+      # --- Generated for you ------------------------------------------------
+      # Signs Flask sessions. Must not be the development default.
+      - key: SECRET_KEY
+        generateValue: true
+
+      # Guards /api/admin/* via the X-Admin-Token header. Those routes return
+      # 503 while this is unset.
+      - key: ADMIN_TOKEN
+        generateValue: true
+
+      # --- Settings ---------------------------------------------------------
+      - key: PYTHON_VERSION
+        value: "3.12.8"
+
+      # production keeps DEBUG off. Leaving this unset or set to development
+      # turns on the Flask debug server behaviour and verbose error output.
+      - key: FLASK_ENV
+        value: production
+
+      - key: GROQ_MODEL
+        value: qwen/qwen3.8-27b
+      - key: GROQ_STT_MODEL
+        value: whisper-large-v3-turbo
+
+      # Keep this under your Groq tier's output-tokens-per-minute limit. The
+      # free tier is 1000. Exceeding it returns a 429 for the entire request
+      # rather than a truncated answer, so long replies fail intermittently.
+      - key: GROQ_MAX_TOKENS
+        value: "900"
+
+      # Only meaningful with a disk attached.
+      - key: MEDIA_ROOT
+        value: instance/media
+
+      - key: LOG_LEVEL
+        value: INFO
+
+      # Rate-limit counters live in process memory. Correct for a single
+      # instance; switch to a shared store before scaling to more than one.
+      #
+      # With the two workers below, memory:// means each enforces its own budget,
+      # so the effective limit is about twice the configured value and every
+      # restart clears every counter. The app logs a warning at boot when
+      # FLASK_ENV=production and this is left as memory://.
+      #
+      # To fix it, point this at Redis (Render offers one, or use Upstash /
+      # Redis Cloud) and uncomment:
+      #   value: redis://:<password>@<host>:6379/0
+      - key: RATE_LIMIT_STORAGE
+        value: "memory://"
+
+      # --- Paystack vendor subscriptions -------------------------------------
+      # TEST MODE. Paste the Test Mode keys from
+      # https://dashboard.paystack.com/#/settings/developers (with Test Mode
+      # toggled ON). A key starting sk_live_ is refused unless
+      # PAYSTACK_ALLOW_LIVE is set below, so a mix-up fails closed.
+      - key: PAYSTACK_SECRET_KEY
+        sync: false
+      - key: PAYSTACK_PUBLIC_KEY
+        sync: false
+
+      # The KSh 100 monthly plan's real Test Mode code (PLN_...). Leave empty
+      # until the plan exists in the Test dashboard; checkout returns 503 until
+      # then. Create it with:
+      #   curl https://api.paystack.co/plan \
+      #     -H "Authorization: Bearer $PAYSTACK_SECRET_KEY" \
+      #     -d '{"name":"Sauti Vendor Subscription","amount":10000,"currency":"KES","interval":"monthly"}'
+      - key: PAYSTACK_PLAN_CODE
+        sync: false
+
+      # The frontend's public origin. Paystack returns the customer to
+      # <PUBLIC_SITE_URL>/payment/callback?reference=... — set it to the same
+      # value as NEXT_PUBLIC_API_URL's origin on the frontend service, without
+      # the /api path.
+      - key: PUBLIC_SITE_URL
+        sync: false
+
+      # Keep false on this deployment. Set it to "true" only together with live
+      # keys, after the test checklist in docs/PAYSTACK_TEST_CHECKLIST.md passes.
+      - key: PAYSTACK_ALLOW_LIVE
+        value: "false"

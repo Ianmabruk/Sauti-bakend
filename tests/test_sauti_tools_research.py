@@ -295,6 +295,13 @@ class TestResearchPipeline:
         assert len(result.sources) > 0
         assert result.provider == "stub"
 
+    def test_weather_queries_use_open_meteo_without_key(self):
+        settings = Settings(search_provider="auto", search_api_key="", user_city="Nairobi", user_country="Kenya")
+        result = run(ResearchPipeline(settings).run("what is the weather forecast in Nairobi"))
+        assert result.ok is True
+        assert result.provider == "open-meteo"
+        assert result.sources
+
     def test_no_results_is_reported_not_faked(self):
         settings = Settings(search_provider="failing")
         result = run(ResearchPipeline(settings).run("current maize price Kenya"))

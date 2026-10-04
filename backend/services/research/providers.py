@@ -184,6 +184,79 @@ _RESULT_SNIPPET = re.compile(
 _TAG = re.compile(r"<[^>]+>")
 
 
+class OpenMeteoProvider(SearchProvider):
+    """Direct no-key weather provider for location-aware forecast queries."""
+
+    name = "open-meteo"
+    requires_key = False
+    geocoding_endpoint = "https://geocoding-api.open-meteo.com/v1/search"
+    forecast_endpoint = "https://api.open-meteo.com/v1/forecast"
+
+    async def search(self, query: str, max_results: int = 8) -> list[Source]:
+        location = _extract_weather_location(query)
+        if not location:
+            raise SearchUnavailable(
+                "No city or town was identified in the weather query. "
+                "Try 'weather in Nairobi' or 'forecast for Mombasa'."
+            )
+
+        async with httpx.AsyncClient(timeout=self.settings.search_timeout) as client:
+            geocode = await client.get(
+                self.geocoding_endpoint,
+                params={"name": location, "count": 1, "language": "en", "format": "json"},
+            )
+            geocode.raise_for_status()
+            payload = geocode.json()
+
+        results = payload.get("results") or []
+        if not results:
+            raise SearchUnavailable(f"No weather data was found for '{location}'.")
+
+        place = results[0]
+        lat = place.get("latitude")
+        lon = place.get("longitude")
+        name = (place.get("name") or location).strip()
+        country = (place.get("country") or "").strip()
+        if lat is None or lon is None:
+            raise SearchUnavailable(f"Weather data for '{location}' could not be resolved.")
+
+        params = {
+            "latitude": lat,
+            "longitude": lon,
+            "current": "temperature_2m,weather_code,relative_humidity_2m,wind_speed_10m,precipitation",
+            "hourly": "temperature_2m,weather_code",
+            "daily": "weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset",
+            "forecast_days": min(max_results, 5) if max_results > 0 else 3,
+            "timezone": "auto",
+        }
+
+        async with httpx.AsyncClient(timeout=self.settings.search_timeout) as client:
+            forecast = await client.get(self.forecast_endpoint, params=params)
+            forecast.raise_for_status()
+            weather = forecast.json()
+
+        current = weather.get("current") or {}
+        daily = weather.get("daily") or {}
+        temps = daily.get("temperature_2m_max") or []
+        mins = daily.get("temperature_2m_min") or []
+        daily_names = daily.get("time") or []
+        summary = _summarise_weather_data(current, daily, name, country)
+
+        title = f"Weather forecast for {name}{', ' + country if country else ''}"
+        source = Source(
+            title=title,
+            url="https://open-meteo.com/",
+            domain="open-meteo.com",
+            snippet=summary,
+            published_at=None,
+            relevance=1.0,
+            source_type=classify_source("https://open-meteo.com/", title),
+        )
+        if not summary:
+            source.snippet = f"Weather conditions for {name} were retrieved from Open-Meteo."
+        return [source]
+
+
 class DuckDuckGoProvider(SearchProvider):
     """Keyless DuckDuckGo HTML endpoint.
 
@@ -262,6 +335,122 @@ def _clean(text: str) -> str:
     return re.sub(r"\s+", " ", html_mod.unescape(text)).strip()
 
 
+def _looks_like_weather_query(text: str) -> bool:
+    lowered = (text or "").lower()
+    markers = (
+        "weather",
+        "forecast",
+        "temperature",
+        "rain",
+        "rainy",
+        "cloudy",
+        "sunny",
+        "wind",
+        "humidity",
+        "tomorrow",
+        "today",
+        "meteo",
+        "hali ya hewa",
+    )
+    return any(marker in lowered for marker in markers)
+
+
+def _extract_weather_location(query: str) -> str:
+    text = (query or "").strip()
+    if not text:
+        return ""
+
+    compact = re.sub(
+        r"^(?:what(?:'s| is)|whats|tell me|please|hey|hi|hello|sauti)\s+",
+        "",
+        text,
+        flags=re.I,
+    )
+    compact = re.sub(
+        r"\b(?:weather|forecast|temperature|rain|rainy|humid(?:ity|ity)|wind|cloud|sunny|meteo|hali ya hewa)\b",
+        "",
+        compact,
+        flags=re.I,
+    )
+    compact = re.sub(r"\s+", " ", compact).strip(" ,.-")
+
+    patterns = [
+        r"\b(?:in|for|at|near)\s+([A-Za-z][A-Za-z\s'-]{1,40})(?=\s*(?:today|tomorrow|now|this week|this month|forecast|weather|report|$))",
+        r"\b(?:in|for|at|near)\s+([A-Za-z][A-Za-z\s'-]{1,40})$",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, re.I)
+        if match:
+            location = match.group(1).strip(" ,.-")
+            if location:
+                return location
+
+    if compact:
+        return compact
+    return text
+
+
+def _summarise_weather_data(current: dict, daily: dict, name: str, country: str) -> str:
+    temp = current.get("temperature_2m")
+    feels = current.get("apparent_temperature")
+    humidity = current.get("relative_humidity_2m")
+    wind = current.get("wind_speed_10m")
+    precipitation = current.get("precipitation")
+    weather_code = current.get("weather_code")
+    high = (daily.get("temperature_2m_max") or [None])[0]
+    low = (daily.get("temperature_2m_min") or [None])[0]
+    code_label = _weather_code_label(weather_code)
+    city = f"{name}{', ' + country if country else ''}"
+    parts = [f"Current weather in {city}: {code_label}"]
+    if temp is not None:
+        parts.append(f"{temp}°C")
+    if feels is not None:
+        parts.append(f"feels like {feels}°C")
+    if humidity is not None:
+        parts.append(f"humidity {humidity}%")
+    if wind is not None:
+        parts.append(f"wind {wind} km/h")
+    if precipitation is not None:
+        parts.append(f"precipitation {precipitation} mm")
+    if high is not None and low is not None:
+        parts.append(f"high {high}°C / low {low}°C today")
+    return "; ".join(parts)
+
+
+def _weather_code_label(code):
+    lookup = {
+        0: "clear sky",
+        1: "mainly clear",
+        2: "partly cloudy",
+        3: "overcast",
+        45: "foggy",
+        48: "depositing rime fog",
+        51: "light drizzle",
+        53: "moderate drizzle",
+        55: "dense drizzle",
+        56: "light freezing drizzle",
+        57: "dense freezing drizzle",
+        61: "slight rain",
+        63: "moderate rain",
+        65: "heavy rain",
+        66: "light freezing rain",
+        67: "heavy freezing rain",
+        71: "light snow",
+        73: "moderate snow",
+        75: "heavy snow",
+        77: "snow grains",
+        80: "light showers",
+        81: "moderate showers",
+        82: "violent showers",
+        85: "light snow showers",
+        86: "heavy snow showers",
+        95: "thunderstorm",
+        96: "thunderstorm with hail",
+        99: "heavy thunderstorm with hail",
+    }
+    return lookup.get(code, "variable conditions")
+
+
 class StubSearchProvider(SearchProvider):
     """Deterministic offline provider used by tests and demos.
 
@@ -336,22 +525,24 @@ PROVIDERS: dict[str, type[SearchProvider]] = {
     "brave": BraveSearchProvider,
     "tavily": TavilySearchProvider,
     "serpapi": SerpApiProvider,
+    "open-meteo": OpenMeteoProvider,
     "duckduckgo": DuckDuckGoProvider,
     "stub": StubSearchProvider,
     "failing": FailingSearchProvider,
 }
 
 #: Preference order used when SEARCH_PROVIDER=auto.
-AUTO_ORDER = ("brave", "tavily", "serpapi", "duckduckgo")
+AUTO_ORDER = ("brave", "tavily", "serpapi", "duckduckgo", "open-meteo")
 
 
-def build_search_provider(settings: Settings) -> SearchProvider:
+def build_search_provider(settings: Settings, query: str | None = None) -> SearchProvider:
     """Select a search provider based on settings.
 
     Raises:
         SearchUnavailable: When no provider can be used.
     """
     requested = (settings.search_provider or "auto").lower()
+    weather_query = bool(query and _looks_like_weather_query(query))
 
     if requested != "auto":
         provider_cls = PROVIDERS.get(requested)
@@ -362,8 +553,14 @@ def build_search_provider(settings: Settings) -> SearchProvider:
             raise SearchUnavailable(
                 f"Search provider '{requested}' requires a web search API key."
             )
+        if weather_query and requested in {"auto", "duckduckgo"} and not settings.search_api_key:
+            provider = OpenMeteoProvider(settings)
         logger.info("SEARCH PROVIDER selected=%s", provider.name)
         return provider
+
+    if weather_query and not settings.search_api_key:
+        logger.info("SEARCH PROVIDER selected=open-meteo (weather query without API key)")
+        return OpenMeteoProvider(settings)
 
     for name in AUTO_ORDER:
         provider = PROVIDERS[name](settings)

@@ -192,7 +192,7 @@ class ResearchPipeline:
 
         # --- provider selection ---
         try:
-            provider = build_search_provider(self.settings)
+            provider = build_search_provider(self.settings, query=search_query)
         except SearchUnavailable as exc:
             step("unavailable", str(exc))
             return ResearchResult(

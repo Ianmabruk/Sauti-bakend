@@ -28,6 +28,10 @@ from .marketplace import (  # noqa: F401
     VendorUpdateRequest,
 )
 from .sauti import SautiChatRequest  # noqa: F401
+from .payments import (  # noqa: F401
+    PaymentInitializeRequest,
+    VendorTokenRequest,
+)
 from .tools import (  # noqa: F401
     ToolCallRequest,
     ToolCallResponse,
@@ -56,4 +60,6 @@ __all__ = [
     "NewsCreateRequest",
     "NewsUpdateRequest",
     "SautiChatRequest",
+    "PaymentInitializeRequest",
+    "VendorTokenRequest",
 ]

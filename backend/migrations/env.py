@@ -47,6 +47,12 @@ from backend.marketplace.models import (  # noqa: E402
     Vendor,
     VendorVerification,
 )
+from backend.payments.models import (  # noqa: E402
+    Payment,
+    PaymentEvent,
+    Plan,
+    Subscription,
+)
 
 target_metadata = [
     User.__table__,
@@ -76,6 +82,10 @@ target_metadata = [
     Order.__table__,
     OrderItem.__table__,
     Transaction.__table__,
+    Plan.__table__,
+    Subscription.__table__,
+    Payment.__table__,
+    PaymentEvent.__table__,
 ]
 
 

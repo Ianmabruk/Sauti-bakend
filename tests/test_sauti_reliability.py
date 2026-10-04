@@ -325,6 +325,25 @@ class TestQueryRewriting:
         result = run(rewrite_query(client, "bitcoin", city="Nairobi", country="Kenya", timezone_name="Africa/Nairobi"))
         assert result == "bitcoin"
 
+    def test_weather_rewrite_keeps_live_intent(self, monkeypatch):
+        client = GroqClient(settings())
+
+        async def ok(self, prompt=None, **kwargs):
+            return "Nairobi"
+
+        monkeypatch.setattr(client, "complete_text", ok)
+        result = run(
+            rewrite_query(
+                client,
+                "Nairobi",
+                city="Nairobi",
+                country="Kenya",
+                timezone_name="Africa/Nairobi",
+                question="what is the weather forecast in Nairobi",
+            )
+        )
+        assert result.lower() == "weather forecast in nairobi"
+
     def test_rambling_rewrite_is_rejected(self, monkeypatch):
         client = GroqClient(settings())
 
